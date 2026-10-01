@@ -4,7 +4,7 @@
 
 This README captures the intended product, established design decisions, explored alternatives, and unresolved engineering work so contributors and coding agents can pick up the project without reconstructing earlier discussions.
 
-> **Status (29 September 2026):** The power-source selection board is defined at the interface level; its KiCad project exists under `Hardware/Power Board/`, but the schematic file is still empty. A **single-lane prototype** is the next hardware milestone before tiling the design four times. **BQ25792 (charge IC) is selected for the single-lane prototype**, with the **STM32G0B1 (microcontroller)** as the MCU. The BQ25713 (original charge controller) is kept as historical context and a fallback. No schematic, tested charging system, or firmware exists yet. Dated decisions are recorded in [§12 Decision log](#12-decision-log); datasheets are in `datasheets/`.
+> **Status (30 September 2026):** The **power-source selection board schematic is drawn** (`Hardware/Power Board/Quadstor Power Board/`, 19 parts). Its parts are synced to a 45 × 45 mm, 2-layer PCB outline, but nothing is routed yet. A netlist review found **issues to fix before layout**, listed in [§3 Power board schematic](#power-board-schematic-as-drawn-2026-09-30). The project is a git repository published at [github.com/ItsReckliss/Quadstor](https://github.com/ItsReckliss/Quadstor). A **single-lane prototype** is the next hardware milestone before tiling the design four times. **BQ25792 (charge IC) is selected for the single-lane prototype**, with the **STM32G0B1 (microcontroller)** as the MCU. The BQ25713 (original charge controller) is kept as historical context and a fallback. No schematic, tested charging system, or firmware exists yet. Dated decisions are recorded in [§12 Decision log](#12-decision-log); datasheets are in `datasheets/`.
 
 ### Key parts at a glance
 
@@ -20,7 +20,7 @@ Parts are referred to by part number throughout; this table gives each one's job
 | SSD1306-class OLED, 0.92" | Display (prototype): header row + one lane panel | Selected (exact module TBD) |
 | Toshiba **TPHR8504PL** | Power MOSFET: BQ25713 switching stage (Q1–Q4) | BQ25713 design only |
 | **AONR21307** | P-MOSFET: BATFET for the BQ25713 design | BQ25713 design only |
-| **AO3401A** | P-MOSFET: bleed switch for cells 2–4 (high-side, cell-referenced) | Proposed (owner suggestion) |
+| **AO3401A** | P-MOSFET: bleed switch for cells 2–4 (high-side, cell-referenced) | Proposed (owner suggestion); datasheet in repo |
 | **AO3400A** | N-MOSFET: bleed switch for cell 1 (ground-referenced) | Proposed |
 | **2N7002** | Small N-MOSFET: level-shifting gate driver for each AO3401A | Proposed |
 | BZT52C5V1 (5.1 V Zener) | Gate-source clamp protecting each AO3401A's ±12 V gate rating | Proposed |
@@ -32,6 +32,12 @@ Parts are referred to by part number throughout; this table gives each one's job
 | **TLV9001** / **MCP6001** | Op-amp: unity-gain buffer between the analog mux and the ADC | Proposed |
 | Tag-Connect TC2030 | Connector-less SWD programming/debug footprint | Proposed |
 | Mean Well 24 V / 200 W | Internal power supply (model TBD) | Planned |
+| **AOD409** (×3) | P-MOSFET, TO-252: power-board source switches (Q1 PSU path; Q2/Q3 back-to-back on the 6S path) | In power-board schematic |
+| **2SA1213-Y** | PNP transistor, SC-62: power board, pulls the 6S FET gates off when the PSU is present (Q4) | In power-board schematic |
+| **AO3400A** (power board) | N-MOSFET: power board PSU-present detector that drives Q4 (Q5) | In power-board schematic |
+| **BZT52C12V** | 12 V Zener: power board gate-source clamp for the 6S FETs (U1) | In power-board schematic |
+| **SMCJ30A-TR** (×2) | TVS diode, 30 V standoff: power board surge clamp on each input (D1 PSU, D2 6S) | In power-board schematic |
+| Littelfuse **01550900M** (×2) | SMD fuse: power board, one per input (FH1 PSU, FH2 6S) | In power-board schematic; rating to confirm |
 
 ## 1. Product goals
 
@@ -89,7 +95,7 @@ The BQ25792 charge IC has a fixed 7-bit I²C address (**0x6B**), so four of them
 
 The separately developed **power-selection board** accepts `VBAT`, `GND`, `GND`, and `VPSU`, and provides `VOUT`, `GND`, and `VSENSE`. `VSENSE` is intended to feed an MCU ADC through a resistor divider. The selected output feeds the charger board directly, with additional local bulk and high-frequency bypass capacitors at each charger IC.
 
-**Confirmed by the owner (2026-09-29):** the existing power board already **handles source selection**, **electrically disconnects the XT60 input when the PSU is on**, and **blocks backfeed**. The charger lanes therefore do not need their own source selection or reverse-current blocking. **Open item:** confirm whether the power board has a **TVS and/or soft-start** to limit XT60 hot-plug spikes, because the lanes have no TVS of their own (see §4).
+**Confirmed by the owner (2026-09-29):** the existing power board already **handles source selection**, **electrically disconnects the XT60 input when the PSU is on**, and **blocks backfeed**. The charger lanes therefore do not need their own source selection or reverse-current blocking. ~~**Open item:** confirm whether the power board has a **TVS and/or soft-start**~~ **Answered by the schematic (2026-09-30):** both inputs have an SMCJ30A TVS diode, but it clamps far above the BQ25792 charge IC's 30 V absolute maximum, and there is no dedicated soft-start. See the review below. **Review note:** the drawn schematic does **not** block backfeed into the PSU (finding 2 below), so the owner's earlier confirmation needs to be rechecked.
 
 Discussed input protection/components:
 
@@ -98,6 +104,34 @@ Discussed input protection/components:
 - Back-to-back P-channel MOSFETs on the XT60 path for source isolation/reverse-current blocking.
 - PSU-priority behavior: when PSU is present, block the external battery from supplying the bus; use the external battery when PSU is absent.
 - `VSENSE` divider for firmware supply-voltage monitoring. Confirm which node it measures in the current schematic.
+
+### Power board schematic (as drawn, 2026-09-30)
+
+The KiCad 10 project is `Hardware/Power Board/Quadstor Power Board/`. Its parts were imported from LCSC with the EasyEDA importer into the project-local `EasyEDA.kicad_sym` / `EasyEDA.pretty` libraries. All 19 footprints are on a **45 × 45 mm, 2-layer** board outline (imported from DXF), with no tracks or copper zones yet.
+
+| Ref | Part (LCSC) | Function |
+|---|---|---|
+| FH1, FH2 | Littelfuse 01550900M SMD fuse (C108518) | Input fuses: FH1 on `VPSU`, FH2 on `VBAT` (6S/XT60). Current rating not yet recorded. |
+| D1, D2 | SMCJ30A-TR TVS diode (C1975473) | Surge clamps: D1 on `VPSU_Protected`, D2 on the fused 6S node |
+| C1, C2 | 1 µF 100 V X7R 1206 (C91151) | C1 on `VPSU_Protected`, C2 on `VOUT` |
+| Q1 | AOD409 P-MOSFET (C36220) | PSU path switch: source `VPSU_Protected`, drain `VOUT`. Gate is biased by the R1/R2 divider to Vgs ≈ −VPSU/2. |
+| Q2, Q3 | AOD409 P-MOSFET (C36220) | 6S path, back-to-back with common sources. Q2 drain on the fused battery, Q3 drain on `VOUT`. |
+| U1 | BZT52C12V 12 V Zener (C5182293) | Clamps the 6S FETs' gate (`VBAT_Gate`) to 12 V below their common source |
+| Q4 | 2SA1213-Y PNP transistor (C396014) | When on, shorts `VBAT_Gate` to the common source, turning the 6S path off |
+| Q5 | AO3400A N-MOSFET (C20917) | PSU-present detector: gate from the R6/R7 divider on `VPSU_Protected`; pulls Q4's base low through R4 |
+| R1–R7 | Labeled "220k"; library part is RC0402FR-071KL (C106235) | Gate/bias dividers and pull-downs (see finding 3) |
+
+**Intended operation:** with the PSU present, Q1 conducts and Q5 turns Q4 on, which holds the 6S FETs off, so the PSU has priority. With the PSU absent, Q5 and Q4 are off, and R3 pulls `VBAT_Gate` low (clamped by U1), turning Q2/Q3 on. Back-to-back Q2/Q3 block current in both directions when off.
+
+Not yet in the schematic: input/output **connectors** (XT60, PSU input, output to the charger board; the nets are global labels only), the `VSENSE` divider, and the duplicate GND pins of the board interface.
+
+**Review findings (Claude, from a netlist exported with kicad-cli on 2026-09-30; verify before layout):**
+
+1. **Q2's gate is unconnected** (ERC net `unconnected-(Q2-G-Pad1)`). A third `VBAT_Gate` label exists but isn't attached. Without the gate, Q2 conducts only through its body diode or turns on unpredictably, and the 6S path can't block reverse current. Connect Q2's gate to `VBAT_Gate`.
+2. **Q1 doesn't block backfeed into the PSU, and the PSU-detect can be fooled.** Q1's body diode conducts from drain to source (`VOUT` → `VPSU_Protected`). When running from the 6S pack with the PSU off, the pack feeds the PSU output through that diode. That also lifts `VPSU_Protected` to about VOUT − 0.7 V, which turns Q5 → Q4 on and shuts the 6S path off. The likely result is the battery path oscillating or failing to stay on. Fixing this needs a PSU-side switch that blocks in both directions (for example a back-to-back pair or an ideal-diode controller), or a PSU-present signal taken upstream of anything `VOUT` can back-drive.
+3. **The resistor value doesn't match the part.** All seven resistors say **220k**, but their library part and LCSC number are **RC0402FR-071KL, which is 1 kΩ**. A BOM ordered by LCSC number would fit 1 kΩ. R1/R2 would then draw ~12 mA from 24 V and dissipate ~0.14 W each, above a 0402's typical 1/16 W rating. Pick a real 220 kΩ 0402 part and LCSC number.
+4. **The TVS doesn't protect the BQ25792 charge IC's 30 V absolute maximum.** The SMCJ30A has a 30 V standoff, 33.3 V minimum breakdown, and ~48 V clamping at rated current (typical datasheet values). It catches large surges but lets `VOUT` exceed 30 V during a spike. This matches the reasoning behind "no per-lane TVS" in §4. Hot-plug ringing still needs scoping, and possibly a lower-voltage clamp or a soft-start/inrush limiter.
+5. **Q5's gate margin is thin.** The R6/R7 divider gives VGS = VPSU/2, which is 12 V at 24 V. The AO3400A's gate rating is ±12 V (verify; datasheet not in repo), so a Mean Well PSU trimmed up, or a spike, overstresses it. Use a lower divider ratio (for example 220k over 100k) or a Zener clamp.
 
 **Important:** Do not assume the power board provides a regulated 24 V output. The charger must tolerate the actual selected input voltage and transients. Absolute maximum is **not** a recommended continuous design target. Check the chosen IC's recommended operating range, transient headroom, TVS coordination, and hot-plug behavior before powering a prototype.
 
@@ -225,7 +259,7 @@ Approximate ideal resistor dissipation and bleed current:
 
 These values are estimates before switch losses and component tolerances. Verify each bleed path's **gate-drive voltage relative to its cell**, especially upper cells; do not connect high-side cell-referenced gates directly to ground-referenced MCU GPIOs. Upper-cell switches sit up to ~13 V above ground, so they need level shifting.
 
-**Proposed bleed-switch circuit (2026-09-29).** The owner suggested the AO3401A (P-MOSFET). The figures below are from memory; add its datasheet to `datasheets/` and verify them.
+**Proposed bleed-switch circuit (2026-09-29).** The owner suggested the AO3401A (P-MOSFET). Its figures below were checked against `datasheets/AO3401A.pdf` (AOS Rev 3.1, Dec 2023) on 2026-09-30.
 
 - **Cells 2–4 (upper cells):**
   - The **AO3401A** source goes to the cell's top node (B1/B2/B3/B+), and its drain goes through the 110 Ω bleed resistor to the cell's bottom node.
@@ -233,7 +267,8 @@ These values are estimates before switch losses and component tolerances. Verify
   - A **2N7002** N-MOSFET, gate driven by an MCU GPIO with a 100 kΩ pull-down, pulls the gate toward GND through ~47 kΩ.
   - A **5.1 V Zener** from gate to source clamps V_GS to about −5 V.
   - Why this is needed: the AO3401A's V_GS limit is **±12 V**, so the gate must never be pulled straight to GND. On the top cell that would apply ~−17 V.
-  - AO3401A (from memory): −30 V V_DS, about 50 mΩ at V_GS = −4.5 V, V_GS(th) about −0.5 to −1.3 V, SOT-23.
+  - AO3401A (datasheet): −30 V V_DS, ±12 V V_GS, 47 mΩ typical / 60 mΩ max at V_GS = −4.5 V, V_GS(th) −0.5 / −0.9 / −1.3 V (min/typ/max), SOT-23. At 40 mA the conduction loss is negligible.
+  - Off-state leakage I_DSS is at most 1 µA at 25 °C (5 µA at 55 °C) per switch. This is small next to the tap-divider drain (§5) but adds to it on a stored, plugged-in pack.
 - **Cell 1 (bottom cell):** B− is GND, so an **AO3400A** N-MOSFET is driven directly from a GPIO, with a 100 kΩ pull-down.
 - **Why not N-channel on the upper cells:**
   - An upper-cell N-FET's source sits at that cell's bottom node (up to ~13 V). Its gate would need to be driven to about the cell's top node, which requires a high-side (P-type) switch plus its own driver. That is two driver transistors per upper cell.
@@ -336,7 +371,7 @@ Prefer current-limited bench supplies and a battery simulator / resistive test f
 
 | Stage | Deliverable | State |
 |---|---|---|
-| Power board | PSU-priority selection, XT60 backup, protected `VOUT`, `VSENSE` | Interface designed; physical validation not documented |
+| Power board | PSU-priority selection, XT60 backup, protected `VOUT`, `VSENSE` | Schematic drawn (2026-09-30); 5 review findings to fix (§3); connectors and `VSENSE` not yet drawn; PCB outline only, unrouted |
 | Single-lane schematic | BQ25792 lane (JST-XH, sensing, four bleed paths, NTC) plus STM32G0B1 MCU, TCA9548A I²C mux, TPS54160A buck regulator for the logic supply, 0.92" OLED, USB-C, SWD pads, buttons, buzzer, LEDs | Next milestone; ICs selected, schematic not started |
 | Single-lane PCB | Assemble and test at low current | Planned |
 | Firmware bring-up | Read charger registers, measure cell taps, control charge and bleed paths | Planned |
@@ -353,7 +388,7 @@ Prefer current-limited bench supplies and a battery simulator / resistive test f
 - **Logic supply:** buck directly to 3.3 V, or buck to 5 V plus LDO (proposed); USB VBUS diode-OR yes or no.
 - **Display:** the final larger single OLED (size, resolution, controller, I²C vs SPI); the lane panel pixel size (proposed 128×24) so four tiles plus the header fit; the I²C mux channel map (proposed ch0–3 lanes).
 - **Protection:** battery temperature sensing, independent overvoltage cutoff, connector current rating, thermal sensors, fault thresholds, and charge enable interlocks.
-- **Power board:** source selection, XT60 disconnect when the PSU is on, and backfeed blocking are confirmed to exist. Still open: whether it has a TVS/soft-start for XT60 hot-plug spikes, the exact schematic and part numbers in the repo, VIN/VSENSE behavior, and test results.
+- **Power board:** the schematic and part numbers are now in the repo (§3). Before layout, fix the unconnected Q2 gate, the backfeed path through Q1 / false PSU detection, the 220k vs 1 kΩ resistor mismatch, and Q5's gate margin. Also decide whether the SMCJ30A TVS diodes are enough given they clamp above 30 V, add the connectors and the `VSENSE` divider, and record the fuse rating. Test results are still needed.
 - **Physical design:** OLED and connector part numbers, board dimensions, cooling/enclosure, PCB stackup, exact BOM, and firmware repository/toolchain.
 
 ## 10. Handoff instructions for contributors and agents
@@ -385,7 +420,16 @@ Quadstor/
 └── images/
 ```
 
-The structure above is a **suggestion**. As of 2026-09-29, the only things that exist are `README.md`, `datasheets/`, and `Hardware/` with `Power Board/Quadstor Power Board/` (a KiCad project with an empty schematic) and empty `Charge Board/` and `Single Module (TEST)/` folders.
+The structure above is a **suggestion**. As of 2026-09-30, the repository contains:
+
+- `README.md` and a `.gitignore`. The `.gitignore` excludes KiCad lock files (`~*.lck`), `*-backups/`, `fp-info-cache`, `*.kicad_prl`, and `_autosave-*`.
+- `datasheets/` (see §11).
+- `Hardware/Power Board/Quadstor Power Board/`: the KiCad 10 power board project (schematic drawn, PCB outline placed), plus its project-local `EasyEDA.kicad_sym`, `EasyEDA.pretty`, and `EasyEDA.3dshapes` libraries.
+- `Hardware/Charge Board/` and `Hardware/Single Module (TEST)/` also exist locally but are empty. Git doesn't track empty folders, so they don't appear on GitHub yet.
+
+The repository is published at [github.com/ItsReckliss/Quadstor](https://github.com/ItsReckliss/Quadstor) (`origin`, branch `main`).
+
+**KiCad library gotcha:** the EasyEDA/LCSC importer once wrote the project's `fp-lib-table` with a `(sym_lib_table` header instead of `(fp_lib_table`. KiCad then ignores the footprint library, and "Update PCB from Schematic" reports every `EasyEDA:...` footprint as "not found." To fix it, change the first line to `(fp_lib_table` with the project closed, then reopen it. Also check that `sym-lib-table` starts with `(sym_lib_table`.
 
 ## 11. References
 
@@ -395,6 +439,9 @@ Datasheets in `datasheets/`:
 - **`STM32G0B1_datasheet.pdf`:** ST STM32G0B1 microcontroller, the selected MCU. The reference manual RM0444 and bootloader note AN2606 are also needed and not yet in the repo.
 - **`tca9548a.pdf`:** TI TCA9548A 8-channel I²C switch/multiplexer.
 - **`tps54160a.pdf`:** TI TPS54160A 60 V buck regulator (SLVSB56C), for the logic supply.
+- **`AO3401A.pdf`:** AOS AO3401A 30 V P-MOSFET (Rev 3.1, Dec 2023), the proposed bleed switch for cells 2–4.
+
+Datasheets for the power board parts (AOD409, 2SA1213-Y, AO3400A, BZT52C12V, SMCJ30A, 01550900M) and for the CD74HC4067SM96 analog mux aren't in the repo yet.
 
 Other:
 
@@ -408,6 +455,9 @@ Newest first. Status is **Decided** (the owner chose it), **Proposed** (recommen
 
 | Date | Decision | Status | Reasoning / notes |
 |---|---|---|---|
+| 2026-09-30 | Power board schematic: AOD409 P-MOSFET PSU switch (Q1); back-to-back AOD409 6S path (Q2/Q3) with BZT52C12V gate clamp; 2SA1213-Y PNP + AO3400A N-MOSFET PSU-present override; SMCJ30A TVS and 01550900M fuse on each input; 45 × 45 mm 2-layer outline | Decided (owner's schematic); fixes pending | Implements PSU priority with the 6S path off when the PSU is present. The netlist review in §3 found an unconnected Q2 gate, backfeed through Q1's body diode that can also falsely trigger PSU detection, 220k-labeled resistors whose part number is 1 kΩ, a TVS that clamps above 30 V, and thin Q5 gate margin. |
+| 2026-09-30 | AO3401A bleed-switch figures verified against the datasheet | Verified | ±12 V V_GS confirmed, so the 5.1 V Zener gate clamp remains necessary; 60 mΩ max at −4.5 V; I_DSS ≤ 1 µA at 25 °C. |
+| 2026-09-30 | Project tracked in git and published to github.com/ItsReckliss/Quadstor, with a KiCad `.gitignore` | Decided | Lock files, backups, autosaves, and per-user `.kicad_prl` view settings are excluded. |
 | 2026-09-29 | TS: 5.23 kΩ REGN→TS, 30.1 kΩ TS→GND, 0603 10 kΩ NTC (B ≈ 3380–3435 K, 5%) next to the JST-XH. Fixed 10 kΩ if sensing is ever dropped. | Decided | TI typical-application divider (E96 values) keeps the datasheet's 0–60 °C / JEITA thresholds. Measures connector/board temperature, not the pack. |
 | 2026-09-29 | Lane input protection: no per-lane TVS; DNP footprint for the ~2 Ω + 2.2 µF VBUS snubber; VBUS 0.1 µF + 2× 10 µF and PMID 0.1 µF + 3× 10 µF, all 50 V X7R | Decided | A TVS with >25.2 V standoff clamps ~40 V, above the 30 V abs max. The power board already does source selection, XT60 disconnect with the PSU on, and backfeed blocking. Its TVS/soft-start is still an open question. |
 | 2026-09-29 | Firmware must never enable BQ25792 OTG (reverse boost) mode, and must read back that it is off after configuration | Decided | Prevents a pack from driving the input bus. |
